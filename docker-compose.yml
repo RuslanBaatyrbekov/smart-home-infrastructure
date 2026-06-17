@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # 1. Main Core Smart Home Platform
+  homeassistant:
+    container_name: homeassistant
+    image: ghcr.io/home-assistant/home-assistant:stable
+    volumes:
+      - ./ha_config:/config
+    environment:
+      - TZ=Europe/Berlin
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+
+  # 2. ESPHome Environment for flashing nodes (ESP32)
+  esphome:
+    container_name: esphome
+    image: ghcr.io/esphome/esphome
+    volumes:
+      - ./esphome_config:/config
+    environment:
+      - TZ=Europe/Berlin
+    restart: unless-stopped
+    ports:
+      - "6052:6052"
+
+  # 3. Speech-to-Text engine (STT)
+  whisper:
+    container_name: whisper
+    image: rhasspy/wyoming-whisper
+    command: --model tiny-int8 --language ru
+    volumes:
+      - ./whisper_data:/data
+    restart: unless-stopped
+    ports:
+      - "10300:10300"
+
+  # 4. Text-to-Speech engine (TTS)
+  piper:
+    container_name: piper
+    image: rhasspy/wyoming-piper
+    command: --voice ru_RU-denis-medium
+    volumes:
+      - ./piper_data:/data
+    restart: unless-stopped
+    ports:
+      - "10200:10200"
+
+  # 5. Wake Word Detection engine
+  openwakeword:
+    image: rhasspy/wyoming-openwakeword:latest
+    container_name: openwakeword
+    restart: unless-stopped
+    ports:
+      - "10400:10400"
+    volumes:
+      - ./wyoming:/data
+
+  # 6. Multi-room Media Streaming Server
+  music-assistant:
+    container_name: mass
+    image: ghcr.io/music-assistant/server:latest
+    ports:
+      - "8095:8095"
+      - "8097:8097"
+    volumes:
+      - ./mass_data:/data
+    restart: unless-stopped

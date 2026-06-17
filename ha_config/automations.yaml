@@ -1,0 +1,69 @@
+- id: '1781380673435'
+  alias: "Jarvis: AI Briefing via Physical Button"
+  description: "Triggers LLM generation and voice briefing when the physical chest button is pressed."
+  triggers:
+    - entity_id: binary_sensor.vintageaudio_vintage_button
+      to: 'on'
+      trigger: state
+  actions:
+    - action: conversation.process
+      data:
+        agent_id: conversation.google_ai_conversation
+        text: !secret jarvis_button_system_prompt
+      response_variable: ai_reply
+    - action: tts.speak
+      target:
+        entity_id: tts.google_ai_tts
+      data:
+        media_player_entity_id: !secret target_vintage_media_player
+        message: '{{ ai_reply.response.speech.plain.speech }}'
+
+- id: '1781522625892'
+  alias: "Jarvis Terminal: Dashboard TTS Emulation"
+  description: "Routes arbitrary text strings submitted from the UI input box to the custom speaker system."
+  triggers:
+    - entity_id: input_text.terminal_dzharvisa
+      trigger: state
+  conditions:
+    - condition: template
+      value_template: '{{ trigger.to_state.state != "" }}'
+  actions:
+    - action: conversation.process
+      data:
+        agent_id: conversation.google_ai_conversation
+        text: '{{ trigger.to_state.state }}'
+      response_variable: ai_reply
+    - action: tts.speak
+      target:
+        entity_id: tts.piper
+      data:
+        media_player_entity_id: !secret target_vintage_media_player
+        message: '{{ ai_reply.response.speech.plain.speech }}'
+        options:
+          voice: ru_RU-irina-medium
+    - action: input_text.set_value
+      target:
+        entity_id: input_text.terminal_dzharvisa
+      data:
+        value: ''
+  mode: single
+
+- id: '1781718745456'
+  alias: "Jarvis: Welcome Greeting (Wi-Fi Ping)"
+  description: "Announces a welcome greeting when the designated tracked smartphone attaches to the local Wi-Fi subnet."
+  triggers:
+    - entity_id: !secret tracked_phone_ping_sensor
+      to: 'on'
+      trigger: state
+  conditions:
+    - condition: time
+      after: "07:00:00"
+      before: "23:00:00"
+  actions:
+    - action: tts.speak
+      target:
+        entity_id: tts.piper
+      data:
+        media_player_entity_id: !secret target_vintage_media_player
+        message: !secret jarvis_welcome_speech_text
+  mode: single

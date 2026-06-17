@@ -1,0 +1,32 @@
+# Sensitive configuration data
+ha_config/secrets.yaml
+esphome_config/secrets.yaml
+
+# Home Assistant logs and internal databases
+ha_config/*.log*
+ha_config/*.db
+ha_config/*.db-shm
+ha_config/*.db-wal
+ha_config/.storage/
+ha_config/.cloud/
+ha_config/.google.token
+ha_config/tts/
+ha_config/backups/
+ha_config/.cache/
+ha_config/.ha_run.lock
+
+# ESPHome build artifacts and binaries
+esphome_config/.esphome/
+*.bin
+*.txt
+
+# Heavy container data (AI models and media storage)
+mass_data/*
+piper_data/*
+whisper_data/*
+wyoming/*
+
+# System and IDE files
+.DS_Store
+Thumbs.db
+.idea/

@@ -1,0 +1,120 @@
+substitutions:
+  name: "vintage-audio"
+  friendly_name: "VintageAudio"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  name_add_mac_suffix: false
+  project:
+    name: esphome.web
+    version: '1.0'
+  build_path: /opt/build
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+# Network definition referencing external secret variables
+wifi:
+  use_address: !secret wifi_static_ip
+  power_save_mode: none
+  networks:
+    - ssid: !secret wifi_ssid_primary
+      password: !secret wifi_password_primary
+    - ssid: !secret wifi_ssid_secondary
+      password: !secret wifi_password_secondary
+
+api:
+ota:
+  - platform: esphome
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+  level: DEBUG
+  logs:
+    voice_assistant: DEBUG
+    i2s_audio: DEBUG
+
+# Common I2S Audio Bus definition for DAC and Microphone
+i2s_audio:
+  - id: i2s_bus
+    i2s_lrclk_pin: GPIO4
+    i2s_bclk_pin: GPIO5
+
+# Audio Output Configuration
+speaker:
+  - platform: i2s_audio
+    id: dac_speaker
+    i2s_audio_id: i2s_bus
+    dac_type: external
+    i2s_dout_pin: GPIO6
+    channel: mono
+
+  # Audio Mixing Platform for simultaneous streams
+  - platform: mixer
+    id: master_mixer
+    output_speaker: dac_speaker
+    source_speakers:
+      - id: media_source
+        sample_rate: 44100
+      - id: announce_source
+        sample_rate: 44100
+
+media_player:
+  - platform: speaker
+    name: "Player Vintage"
+    media_pipeline:
+      speaker: media_source
+    announcement_pipeline:
+      speaker: announce_source
+
+# Local Pipeline Integration for Voice Assistant
+voice_assistant:
+  microphone: komod_mic
+  speaker: announce_source
+  use_wake_word: true
+
+# Audio Input Configuration
+microphone:
+  - platform: i2s_audio
+    id: komod_mic
+    i2s_audio_id: i2s_bus
+    i2s_din_pin: GPIO12
+    adc_type: external
+    pdm: false
+
+# On-device Wake Word Detection Engine
+micro_wake_word:
+  models:
+    - model: hey_jarvis
+      probability_cutoff: 0.97
+
+# Hardware Button Control mapping
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO0
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: "Mic Test Button"
+    on_press:
+      - voice_assistant.start:
+
+# Optimized hardware Bluetooth scanner settings to mitigate Wi-Fi starvation
+esp32_ble_tracker:
+  scan_parameters:
+    interval: 320ms
+    window: 30ms
+    active: false
+
+# Expose Bluetooth Proxy layer to Home Assistant core
+bluetooth_proxy:
+  active: true
