@@ -30,3 +30,12 @@ wyoming/*
 .DS_Store
 Thumbs.db
 .idea/
+
+# Local ESPHome toolchain cache
+esphome_cache/
+# Old HA/ESPHome configs and local backups (may contain API keys / tokens)
+ha_config_old/
+esphome_config/archive/
+_backup_*/
+**/secrets.yaml
+ha_config/.ha_run.lock
