@@ -1,19 +1,27 @@
-version: '3.8'
+# HA и Music Assistant работают в host-сети: так работают mDNS-обнаружение,
+# Chromecast/DLNA-колонки, Wi-Fi-розетки и потоковый звук на комод.
+# Wyoming-сервисы (STT/TTS/wake word) остаются в bridge, HA ходит к ним через 127.0.0.1.
+
+networks:
+  smart-home:
+    driver: bridge
 
 services:
-  # 1. Main Core Smart Home Platform
   homeassistant:
     container_name: homeassistant
     image: ghcr.io/home-assistant/home-assistant:stable
+    network_mode: host
     volumes:
       - ./ha_config:/config
+      - /etc/localtime:/etc/localtime:ro
     environment:
       - TZ=Europe/Berlin
     restart: unless-stopped
-    ports:
-      - "8123:8123"
+    depends_on:
+      - whisper
+      - piper
+      - openwakeword
 
-  # 2. ESPHome Environment for flashing nodes (ESP32)
   esphome:
     container_name: esphome
     image: ghcr.io/esphome/esphome
@@ -24,46 +32,49 @@ services:
     restart: unless-stopped
     ports:
       - "6052:6052"
+    networks:
+      - smart-home
 
-  # 3. Speech-to-Text engine (STT)
   whisper:
     container_name: whisper
     image: rhasspy/wyoming-whisper
-    command: --model tiny-int8 --language ru
+    # tiny слишком часто ошибается на русском, small-int8 - разумный компромисс по CPU
+    command: --model small-int8 --language ru --beam-size 1
     volumes:
       - ./whisper_data:/data
     restart: unless-stopped
     ports:
       - "10300:10300"
+    networks:
+      - smart-home
 
-  # 4. Text-to-Speech engine (TTS)
   piper:
     container_name: piper
     image: rhasspy/wyoming-piper
-    command: --voice ru_RU-denis-medium
+    command: --voice ru_RU-ruslan-medium
     volumes:
       - ./piper_data:/data
     restart: unless-stopped
     ports:
       - "10200:10200"
+    networks:
+      - smart-home
 
-  # 5. Wake Word Detection engine
   openwakeword:
-    image: rhasspy/wyoming-openwakeword:latest
     container_name: openwakeword
+    image: rhasspy/wyoming-openwakeword
+    volumes:
+      - ./wyoming:/data
     restart: unless-stopped
     ports:
       - "10400:10400"
-    volumes:
-      - ./wyoming:/data
+    networks:
+      - smart-home
 
-  # 6. Multi-room Media Streaming Server
   music-assistant:
     container_name: mass
     image: ghcr.io/music-assistant/server:latest
-    ports:
-      - "8095:8095"
-      - "8097:8097"
+    network_mode: host
     volumes:
       - ./mass_data:/data
     restart: unless-stopped
