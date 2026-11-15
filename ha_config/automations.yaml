@@ -1,69 +1,74 @@
 - id: '1781380673435'
   alias: "Jarvis: AI Briefing via Physical Button"
-  description: "Triggers LLM generation and voice briefing when the physical chest button is pressed."
-  triggers:
-    - entity_id: binary_sensor.vintageaudio_vintage_button
-      to: 'on'
-      trigger: state
-  actions:
-    - action: conversation.process
-      data:
-        agent_id: conversation.google_ai_conversation
-        text: !secret jarvis_button_system_prompt
-      response_variable: ai_reply
-    - action: tts.speak
-      target:
-        entity_id: tts.google_ai_tts
-      data:
-        media_player_entity_id: !secret target_vintage_media_player
-        message: '{{ ai_reply.response.speech.plain.speech }}'
-
-- id: '1781522625892'
-  alias: "Jarvis Terminal: Dashboard TTS Emulation"
-  description: "Routes arbitrary text strings submitted from the UI input box to the custom speaker system."
-  triggers:
-    - entity_id: input_text.terminal_dzharvisa
-      trigger: state
-  conditions:
-    - condition: template
-      value_template: '{{ trigger.to_state.state != "" }}'
-  actions:
-    - action: conversation.process
-      data:
-        agent_id: conversation.google_ai_conversation
-        text: '{{ trigger.to_state.state }}'
-      response_variable: ai_reply
-    - action: tts.speak
-      target:
-        entity_id: tts.piper
-      data:
-        media_player_entity_id: !secret target_vintage_media_player
-        message: '{{ ai_reply.response.speech.plain.speech }}'
-        options:
-          voice: ru_RU-irina-medium
-    - action: input_text.set_value
-      target:
-        entity_id: input_text.terminal_dzharvisa
-      data:
-        value: ''
+  description: >-
+    Короткое нажатие кнопки на комоде -> Джарвис здоровается и говорит время и погоду.
+    Текст генерирует Gemini (llm_agent). Если Gemini недоступен или llm_agent пустой,
+    фраза собирается шаблоном локально.
   mode: single
-
-- id: '1781718745456'
-  alias: "Jarvis: Welcome Greeting (Wi-Fi Ping)"
-  description: "Announces a welcome greeting when the designated tracked smartphone attaches to the local Wi-Fi subnet."
+  max_exceeded: silent
   triggers:
-    - entity_id: !secret tracked_phone_ping_sensor
-      to: 'on'
-      trigger: state
-  conditions:
-    - condition: time
-      after: "07:00:00"
-      before: "23:00:00"
+    # короткое нажатие кнопки на комоде (событие из прошивки vintage-audio)
+    - trigger: event
+      event_type: esphome.jarvis_button
+      event_data:
+        type: short
+  variables:
+    llm_agent: conversation.google_ai_conversation   # пусто = шаблонная фраза без ИИ
+    weather_entity: weather.forecast_home_assistant
+    conditions_ru:
+      clear-night: "ясно"
+      cloudy: "облачно"
+      exceptional: "необычная погода"
+      fog: "туман"
+      hail: "град"
+      lightning: "гроза"
+      lightning-rainy: "гроза с дождём"
+      partlycloudy: "переменная облачность"
+      pouring: "ливень"
+      rainy: "дождь"
+      snowy: "снег"
+      snowy-rainy: "мокрый снег"
+      sunny: "солнечно"
+      windy: "ветрено"
+      windy-variant: "ветрено и облачно"
+    weather_text: >-
+      {% set w = states(weather_entity) %}
+      {% if w in ['unknown', 'unavailable'] %}данные о погоде недоступны
+      {%- else %}{{ conditions_ru.get(w, w) }}, {{ state_attr(weather_entity, 'temperature') | round(0) | int }} градусов{% endif %}
+    fallback_text: >-
+      {% set h = now().hour %}
+      {% if h < 5 %}Доброй ночи{% elif h < 12 %}Доброе утро{% elif h < 18 %}Добрый день{% else %}Добрый вечер{% endif %}.
+      Сейчас {{ now().strftime('%H:%M') }}. На улице {{ weather_text }}.
   actions:
-    - action: tts.speak
-      target:
-        entity_id: tts.piper
-      data:
-        media_player_entity_id: !secret target_vintage_media_player
-        message: !secret jarvis_welcome_speech_text
-  mode: single
+    - action: script.jarvis_talk_visuals
+    - if:
+        - condition: template
+          value_template: "{{ llm_agent | length > 0 }}"
+      then:
+        - action: conversation.process
+          data:
+            agent_id: "{{ llm_agent }}"
+            language: ru
+            text: >-
+              Ты — Джарвис, ИИ-ассистент, встроенный в винтажный аудио-комод.
+              Кто-то только что нажал кнопку на панели. Текущее время: {{ now().strftime('%H:%M') }}.
+              Погода на улице: {{ weather_text }}. Напиши короткое сообщение (не больше 3 предложений):
+              поприветствуй хозяев и кратко доложи о погоде и времени.
+              Не используй эмодзи и разметку. Отвечай строго на русском языке.
+          response_variable: ai_reply
+          continue_on_error: true
+        - action: assist_satellite.announce
+          target:
+            entity_id: assist_satellite.vintageaudio_assist_satellite
+          data:
+            preannounce: false
+            message: >-
+              {% if ai_reply is defined and ai_reply.response.response_type != 'error' %}{{ ai_reply.response.speech.plain.speech }}{% else %}{{ fallback_text }}{% endif %}
+      else:
+        - action: assist_satellite.announce
+          target:
+            entity_id: assist_satellite.vintageaudio_assist_satellite
+          data:
+            preannounce: false
+            message: "{{ fallback_text }}"
+    - action: script.jarvis_stop_visuals

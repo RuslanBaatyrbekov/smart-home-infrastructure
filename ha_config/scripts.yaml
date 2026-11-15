@@ -1,0 +1,16 @@
+jarvis_talk_visuals:
+  alias: "Jarvis: Start Talking Visuals"
+  sequence:
+    - action: light.turn_on
+      target:
+        entity_id: light.vintageaudio_jarvis_rgb_status
+      data:
+        effect: "Talking"
+        rgb_color: [0, 204, 255]
+
+jarvis_stop_visuals:
+  alias: "Jarvis: Stop Visuals"
+  sequence:
+    - action: light.turn_off
+      target:
+        entity_id: light.vintageaudio_jarvis_rgb_status
