@@ -7,8 +7,9 @@ esphome:
   friendly_name: ${friendly_name}
   name_add_mac_suffix: false
   project:
-    name: esphome.web
-    version: '1.0'
+    name: ruslan.vintage-audio
+    version: "1.1"
+  # сборка внутри контейнера, а не на NTFS-разделе: в разы быстрее
   build_path: /opt/build
 
 esp32:
@@ -21,42 +22,55 @@ psram:
   mode: octal
   speed: 80MHz
 
-# Network definition referencing external secret variables
 wifi:
-  use_address: !secret wifi_static_ip
   power_save_mode: none
   networks:
     - ssid: !secret wifi_ssid_primary
       password: !secret wifi_password_primary
-    - ssid: !secret wifi_ssid_secondary
-      password: !secret wifi_password_secondary
+  manual_ip:
+    static_ip: !secret vintage_audio_ip
+    gateway: !secret gateway_ip
+    subnet: !secret subnet_mask
+    dns1: !secret gateway_ip
+  # если Wi-Fi пропал - поднимет свою точку доступа для перенастройки
+  ap:
+    ssid: "VintageAudio Fallback"
+    password: !secret fallback_ap_password
+
+captive_portal:
 
 api:
+  encryption:
+    key: !secret api_encryption_key
+  on_client_connected:
+    - micro_wake_word.start:
+  on_client_disconnected:
+    - voice_assistant.stop:
+    - micro_wake_word.stop:
+
 ota:
   - platform: esphome
+    password: !secret ota_password
+
 logger:
   hardware_uart: USB_SERIAL_JTAG
-  level: DEBUG
-  logs:
-    voice_assistant: DEBUG
-    i2s_audio: DEBUG
+  level: INFO
 
-# Common I2S Audio Bus definition for DAC and Microphone
 i2s_audio:
-  - id: i2s_bus
+  - id: i2s_bus_speaker
     i2s_lrclk_pin: GPIO4
     i2s_bclk_pin: GPIO5
+  - id: i2s_bus_mic
+    i2s_lrclk_pin: GPIO15
+    i2s_bclk_pin: GPIO16
 
-# Audio Output Configuration
 speaker:
   - platform: i2s_audio
     id: dac_speaker
-    i2s_audio_id: i2s_bus
+    i2s_audio_id: i2s_bus_speaker
     dac_type: external
     i2s_dout_pin: GPIO6
     channel: mono
-
-  # Audio Mixing Platform for simultaneous streams
   - platform: mixer
     id: master_mixer
     output_speaker: dac_speaker
@@ -66,55 +80,124 @@ speaker:
       - id: announce_source
         sample_rate: 44100
 
+microphone:
+  - platform: i2s_audio
+    id: komod_mic
+    i2s_audio_id: i2s_bus_mic
+    i2s_din_pin: GPIO7
+    adc_type: external
+    pdm: false
+
 media_player:
   - platform: speaker
+    id: vintage_player
     name: "Player Vintage"
     media_pipeline:
       speaker: media_source
     announcement_pipeline:
       speaker: announce_source
 
-# Local Pipeline Integration for Voice Assistant
-voice_assistant:
-  microphone: komod_mic
-  speaker: announce_source
-  use_wake_word: true
+light:
+  - platform: esp32_rmt_led_strip
+    name: "Jarvis RGB Status"
+    id: jarvis_rgb
+    pin: GPIO48
+    num_leds: 1
+    rgb_order: GRB
+    chipset: WS2812
+    effects:
+      - pulse:
+          name: "Talking"
+          transition_length: 500ms
+          update_interval: 500ms
 
-# Audio Input Configuration
-microphone:
-  - platform: i2s_audio
-    id: komod_mic
-    i2s_audio_id: i2s_bus
-    i2s_din_pin: GPIO12
-    adc_type: external
-    pdm: false
-
-# On-device Wake Word Detection Engine
+# "Hey Jarvis" распознаётся прямо на ESP32, в HA уходит только сама команда
 micro_wake_word:
+  id: mww
+  microphone: komod_mic
   models:
     - model: hey_jarvis
       probability_cutoff: 0.97
+  on_wake_word_detected:
+    - voice_assistant.start:
+        wake_word: !lambda return wake_word;
 
-# Hardware Button Control mapping
+voice_assistant:
+  id: va
+  microphone: komod_mic
+  media_player: vintage_player
+  use_wake_word: false
+  on_listening:
+    - light.turn_on:
+        id: jarvis_rgb
+        brightness: 100%
+        red: 0%
+        green: 80%
+        blue: 100%
+  on_stt_end:
+    - light.turn_on:
+        id: jarvis_rgb
+        effect: "Talking"
+        brightness: 100%
+        red: 0%
+        green: 80%
+        blue: 100%
+  on_end:
+    - light.turn_off: jarvis_rgb
+    - wait_until:
+        not:
+          voice_assistant.is_running:
+    - micro_wake_word.start:
+  on_error:
+    - light.turn_on:
+        id: jarvis_rgb
+        brightness: 100%
+        red: 100%
+        green: 0%
+        blue: 0%
+    - delay: 2s
+    - light.turn_off: jarvis_rgb
+
+# Кнопка на панели:
+#   короткое нажатие -> событие в HA (приветствие с погодой, автоматизация в HA)
+#   долгое нажатие   -> сразу слушает команду, без "Hey Jarvis"
 binary_sensor:
   - platform: gpio
+    id: panel_button
     pin:
       number: GPIO0
       inverted: true
+      ignore_strapping_warning: true
       mode:
         input: true
         pullup: true
     name: "Mic Test Button"
-    on_press:
-      - voice_assistant.start:
+    filters:
+      - delayed_on: 20ms
+    on_click:
+      - min_length: 20ms
+        max_length: 600ms
+        then:
+          - homeassistant.event:
+              event: esphome.jarvis_button
+              data:
+                type: short
+      - min_length: 600ms
+        max_length: 5s
+        then:
+          - if:
+              condition:
+                voice_assistant.is_running:
+              then:
+                - voice_assistant.stop:
+              else:
+                - voice_assistant.start:
 
-# Optimized hardware Bluetooth scanner settings to mitigate Wi-Fi starvation
 esp32_ble_tracker:
   scan_parameters:
     interval: 320ms
     window: 30ms
     active: false
 
-# Expose Bluetooth Proxy layer to Home Assistant core
 bluetooth_proxy:
   active: true
