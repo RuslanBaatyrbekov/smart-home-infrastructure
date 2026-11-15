@@ -44,20 +44,23 @@ flowchart LR
 
 ## Services
 
-| Service | Image | Port | Role |
-|---|---|---|---|
-| `homeassistant` | `home-assistant:stable` | 8123 | Core automation platform |
-| `esphome` | `esphome/esphome` | 6052 | Builds and flashes ESP32 firmware over the air |
-| `whisper` | `rhasspy/wyoming-whisper` | 10300 | Local speech-to-text (`tiny-int8`) |
-| `piper` | `rhasspy/wyoming-piper` | 10200 | Local text-to-speech |
-| `openwakeword` | `rhasspy/wyoming-openwakeword` | 10400 | Server-side wake word detection |
-| `music-assistant` | `music-assistant/server` | 8095 / 8097 | Multi-room media streaming |
+| Service | Image | Port | Network | Role |
+|---|---|---|---|---|
+| `homeassistant` | `home-assistant:stable` | 8123 | host | Core automation platform (mDNS discovery, Cast/DLNA, Wi-Fi plugs) |
+| `esphome` | `esphome/esphome` | 6052 | bridge | Builds and flashes ESP32 firmware over the air |
+| `whisper` | `rhasspy/wyoming-whisper` | 10300 | bridge | Local speech-to-text (`small-int8`, Russian) |
+| `piper` | `rhasspy/wyoming-piper` | 10200 | bridge | Local text-to-speech (`ru_RU-ruslan-medium`) |
+| `openwakeword` | `rhasspy/wyoming-openwakeword` | 10400 | bridge | Server-side wake word for satellites without on-device detection |
+| `music-assistant` | `music-assistant/server` | 8095 / 8097 | host | Multi-room media streaming |
+
+Home Assistant runs on the host network and reaches the Wyoming services via `127.0.0.1:<port>`.
 
 ## What it does
 
 - **Voice satellite** — the ESP32-S3 detects "Hey Jarvis" on-device, streams audio to Home Assistant and plays answers through an audio mixer, so announcements can interrupt music without stopping it.
-- **AI briefing button** — a physical button sends a configurable prompt to the conversation agent and reads the answer aloud on the radio.
-- **Presence-based greeting** — network presence tracking (phone ping) triggers a welcome message when someone comes home.
+- **Panel button** — short press: greeting with time and weather, written by the conversation agent (falls back to a local template if the LLM is unavailable); long press: listen for a command without the wake word.
+- **Hybrid conversation agent** — Google Gemini with "prefer local intents": simple commands ("turn on the light") are handled locally, everything else goes to Gemini.
+- **Secure device link** — encrypted ESPHome API, password-protected OTA, fallback Wi-Fi hotspot on the radio.
 - **Bluetooth proxy** — the radio extends Home Assistant's BLE range; scan parameters are tuned to avoid starving Wi-Fi.
 - **Infrastructure as code** — all configuration is versioned; secrets and heavy model/media data stay out of Git.
 
@@ -85,11 +88,21 @@ esphome_config/             ESPHome node definitions (vintage-audio.yaml)
 *_data/, wyoming/           model and media volumes (git-ignored)
 ```
 
+## Network
+
+Router subnet `192.168.2.0/24`, gateway `192.168.2.1`. Reserve in the router DHCP settings:
+
+- `192.168.2.31` — the server running this stack
+- `192.168.2.35` — the vintage radio (ESP32-S3)
+
+On Windows (WSL2) `network_mode: host` needs mirrored networking — copy `wslconfig` to `%UserProfile%\.wslconfig`.
+
 ## Moving to a new server or router
 
 1. Clone the repository on the new host and recreate both `secrets.yaml` files from the examples.
-2. Give the tracked phone a static DHCP reservation matching `tracked_phone_ping_sensor`'s IP.
+2. Update the IPs in `esphome_config/secrets.yaml` and the Home Assistant internal URL (Settings → System → Network).
 3. `docker compose up -d`, then update the ESPHome nodes from the dashboard — they rebuild with the new credentials.
+4. After changing `api_encryption_key`, enter the new key in Home Assistant: Settings → Devices → ESPHome → VintageAudio → Reconfigure.
 
 ## License
 
